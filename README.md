@@ -4,12 +4,6 @@ This code is PyTorch implementation of our work, [Diverse and Admissible Traject
 
 Trajectory forecasting task was implemented using normalizing-flow, and achieving diverse while admissible trajectorys for vehicles.
 
-## Things to do
-
-- [ ] Check the *requirements*
-- [ ] Select appropriate License
-
-
 ## Dataset
 
 You will have to download dataset into **data/[corresponding dataset]**, then verify it.
@@ -38,6 +32,12 @@ python3 main.py \
 --test_cache "./caches/argo_val_cache.pkl"  \
 --test_partition 'val' --test_dir "./test/argoverse/AttGloScene-LocScene-CAM-NF" --test_ckpt "checkpoint.pth.tar"
 ```
+
+## Things to do
+
+- [ ] MATF_GAN had runtime error which has fixed. For coherence, this will be updated after recieving it.
+- [ ] Check the *requirements*
+- [ ] Select appropriate License; currently we used GPLv3.
 
 
 ## Citation

@@ -1,0 +1,7 @@
+**/*.pkl
+**/.vscode/
+**/__pycache__/
+*.pth
+outputs/
+experiments/
+**/.ipynb_checkpoints/
