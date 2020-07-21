@@ -2,11 +2,20 @@
 
 This code is PyTorch implementation of our work, [Diverse and Admissible Trajectory Forecasting through Multimodal Context Understanding](https://arxiv.org/abs/2003.03212) (Seong Hyeon Park, Gyubok Lee, Manoj Bhat, Jimin Seo, Minseok Kang, Jonathan Francis, Ashwin R. Jadhav, Paul Pu Liang and Louis-Philippe Morency). 
 
+![Model Diagram](model_figure.png)
+
 Trajectory forecasting task was implemented using normalizing-flow, and achieving diverse while admissible trajectorys for vehicles.
 
 ## Dataset
 
-You will have to download dataset into **data/[corresponding dataset]**, then verify it.
+You will have to download dataset into **data/[corresponding dataset]**, then verify the subdirectory of each dataset. Dataset should have structure same as:
+
+```
+-[dataset]
+  |- 
+```
+
+Dataset will be extracted as cache at the initial execution. When not specified, cache file will be used for preceeding experiments. 
 
 ## Training
 
@@ -35,9 +44,9 @@ python3 main.py \
 
 ## Things to do
 
+- [x] ~~Select appropriate License; currently we used GPLv3.~~
 - [ ] MATF_GAN had runtime error which has fixed. For coherence, this will be updated after recieving it.
 - [ ] Check the *requirements*
-- [ ] Select appropriate License; currently we used GPLv3.
 
 
 ## Citation
@@ -55,4 +64,4 @@ Please cite the original publication;
 
 ## License
 
-This code is published under the [License name](#LICENSE).
+This code is published under the [General Public License version 3.0](LICENSE).
