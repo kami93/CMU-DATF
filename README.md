@@ -44,7 +44,7 @@ python3 main.py \
 
 ## Things to do
 
-- [x] ~~Select appropriate License; currently we used GPLv3.~~
+- [x] ~~Select appropriate License; currently we used GPLv3.~~ -> License was changed to GPLv2.
 - [ ] MATF_GAN had runtime error which has fixed. For coherence, this will be updated after recieving it.
 - [ ] Check the *requirements*
 
@@ -64,4 +64,4 @@ Please cite the original publication;
 
 ## License
 
-This code is published under the [General Public License version 3.0](LICENSE).
+This code is published under the [General Public License version 2.0](LICENSE).
