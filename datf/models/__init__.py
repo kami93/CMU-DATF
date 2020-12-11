@@ -1,31 +1,3 @@
-# # from .anchor_heads import *  # noqa: F401,F403
-# from .builder import (
-#     build_backbone,
-#     build_detector,
-#     build_head,
-#     build_loss,
-#     build_neck,
-#     build_roi_extractor,
-#     build_shared_head,
-# )
-# from .detectors import *  # noqa: F401,F403
-# from .necks import *  # noqa: F401,F403
-# from .readers import *
-# from .registry import (
-#     ENCODERS,
-#     DECODERS,
-#     LOSSES,
-# )
-
-# __all__ = [
-#     "ENCODERS",
-#     "DECODERS",
-#     "build_encoder",
-#     "build_decoder",
-#     "build_loss",
-#     "build_detector",
-# ]
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
