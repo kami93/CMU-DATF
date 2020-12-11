@@ -19,32 +19,25 @@ Dataset will be extracted as cache at the initial execution. When not specified,
 
 ## Training
 
-See details on *main.py*
+See details on *train.py*
 
 To train proposed method;
 ```
-python3 main.py \
---tag='Global_Scene_CAM_NFDecoder' --model_type='Global_Scene_CAM_NFDecoder' \
---dataset=nuscenes --batch_size=4 --num_epochs=100 --gpu_devices=3 \
---train_cache "./caches/nusc_train_cache.pkl" --val_cache ~/caches/nusc_val_cache.pkl \
---map_version '2.0' 
+python setup.py develop && CUDA_VISIBLE_DEVICES=2 python train.py --config=config_atgs_cam_nf
 ```
 
 
 ## Testing
 
 Testing will be used by assigning checkpoint to argument *--test_ckpt*;
+Make sure to change the TRAIN flag on the config file to false 
 ```
-python3 main.py \
---tag "test-Global_Scene_CAM_NFDecoder" --model_type "Global_Scene_CAM_NFDecoder" \
---dataset argoverse --batch_size 64 --gpu_devices 0 \
---test_cache "./caches/argo_val_cache.pkl"  \
---test_partition 'val' --test_dir "./test/argoverse/AttGloScene-LocScene-CAM-NF" --test_ckpt "checkpoint.pth.tar"
+python setup.py develop && CUDA_VISIBLE_DEVICES=2 python test.py --config=config_atgs_cam_nf --test_ckpt="xyz.tar"
 ```
 
 ## Things to do
 
-- [x] ~~Select appropriate License; currently we used GPLv3.~~ -> License was changed to GPLv2.
+- [x] ~~Select appropriate License; currently we used GPLv3.~~
 - [ ] MATF_GAN had runtime error which has fixed. For coherence, this will be updated after recieving it.
 - [ ] Check the *requirements*
 
@@ -64,4 +57,4 @@ Please cite the original publication;
 
 ## License
 
-This code is published under the [General Public License version 2.0](LICENSE).
+This code is published under the [General Public License version 3.0](LICENSE).
