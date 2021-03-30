@@ -1,17 +1,19 @@
-import os
-import pickle
+import pathlib
 import multiprocessing as mp
+from typing import Dict, List, Tuple, Optional, Union
 
-import cv2
+from compress_pickle import dump, load
+from pyquaternion import Quaternion
 import numpy as np
 from PIL import Image
-
+import cv2
 import torch
 from torchvision import transforms
 import torch.nn.functional as F
 from torch.utils.data.dataset import Dataset
 
-_data_dir = './data/argoverse'
+from shapely import affinity
+from shapely.geometry import Polygon, MultiPolygon, LineString, Point, box
 
 class ParallelSim(object):
     def __init__(self, processes):
@@ -24,13 +26,17 @@ class ParallelSim(object):
         self.pool.apply_async(func=func, args=args, callback=self.complete)
         self.total_processes += 1
 
-    def complete(self, result_tuple):
-        result, flag = result_tuple
-        if flag:
+    def complete(self, result):
+        if result is not None:
             self.results.append(result)
-        self.completed_processes += 1
-        print('-- processed {:d}/{:d}'.format(self.completed_processes,
-                                              self.total_processes), end='\r')
+            self.completed_processes += 1
+
+            if self.completed_processes == self.total_processes:
+                print('-- loaded {:d}/{:d}, complete.'.format(self.completed_processes,
+                                                              self.total_processes))
+            else:
+                print('-- loaded {:d}/{:d}'.format(self.completed_processes,
+                                                    self.total_processes), end='\r')
 
     def run(self):
         self.pool.close()
@@ -39,7 +45,7 @@ class ParallelSim(object):
     def get_results(self):
         return self.results
 
-def argoverse_collate(batch, test_set=False):
+def argoverse_collate(batch):
     # batch_i:
     # 1. past_agents_traj : (Num obv agents in batch_i X 20 X 2)
     # 2. past_agents_traj_len : (Num obv agents in batch_i, )
@@ -54,84 +60,66 @@ def argoverse_collate(batch, test_set=False):
 
     batch_size = len(batch)
 
-    if test_set:
-        past_agents_traj, past_agents_traj_len, future_agent_masks, decode_start_vel, decode_start_pos, map_image, prior, scene_id = list(zip(*batch))
+    obsv_traj, obsv_traj_len, pred_traj, pred_traj_len, decoding_agents_mask, decode_start_pos, decode_start_vel, context_map, prior_map, vis_map, metadata = list(zip(*batch))
 
-    else:
-        past_agents_traj, past_agents_traj_len, future_agents_traj, future_agents_traj_len, future_agent_masks, decode_start_vel, decode_start_pos, map_image, prior, scene_id = list(zip(*batch))
-        
-        # Future agent trajectory
-        num_future_agents = np.array([len(x) for x in future_agents_traj])
-        future_agents_traj = np.concatenate(future_agents_traj, axis=0)
-        future_agents_traj_len = np.concatenate(future_agents_traj_len, axis=0)
-        
-        future_agents_three_idx = future_agents_traj.shape[1]
-        future_agents_two_idx = int(future_agents_three_idx * 2 // 3)
-
-        future_agents_three_mask = future_agents_traj_len >= future_agents_three_idx
-        future_agents_two_mask = future_agents_traj_len >= future_agents_two_idx
-        
-        future_agents_traj_len_idx = []
-        for traj_len in future_agents_traj_len:
-            future_agents_traj_len_idx.extend(list(range(traj_len)))
-
-        # Convert to Tensor
-        num_future_agents = torch.LongTensor(num_future_agents)
-        future_agents_traj = torch.FloatTensor(future_agents_traj)
-        future_agents_traj_len = torch.LongTensor(future_agents_traj_len)
-
-        future_agents_three_mask = torch.BoolTensor(future_agents_three_mask)
-        future_agents_two_mask = torch.BoolTensor(future_agents_two_mask)
-
-        future_agents_traj_len_idx = torch.LongTensor(future_agents_traj_len_idx)
-
-
-    # Past agent trajectory
-    num_past_agents = np.array([len(x) for x in past_agents_traj])
-    past_agents_traj = np.concatenate(past_agents_traj, axis=0)
-    past_agents_traj_len = np.concatenate(past_agents_traj_len, axis=0)
-    past_agents_traj_len_idx = []
-    for traj_len in past_agents_traj_len:
-        past_agents_traj_len_idx.extend(list(range(traj_len)))
+    # Observation trajectories
+    num_obsv_agents = np.array([len(x) for x in obsv_traj_len])
+    obsv_traj = np.concatenate(obsv_traj, axis=0)
+    obsv_traj_len = np.concatenate(obsv_traj_len, axis=0)
 
     # Convert to Tensor
-    num_past_agents = torch.LongTensor(num_past_agents)
-    past_agents_traj = torch.FloatTensor(past_agents_traj)
-    past_agents_traj_len = torch.LongTensor(past_agents_traj_len)
-    past_agents_traj_len_idx = torch.LongTensor(past_agents_traj_len_idx)
+    num_obsv_agents = torch.LongTensor(num_obsv_agents)
+    obsv_traj = torch.FloatTensor(obsv_traj)
+    obsv_traj_len = torch.LongTensor(obsv_traj_len)
 
+    # Prediction trajectories
+    condition = [isinstance(element, np.ndarray) for element in pred_traj]
+    if False not in condition:
+        pred_traj = np.concatenate(pred_traj, axis=0)
+        pred_traj = torch.FloatTensor(pred_traj)
 
-    # Future agent mask
-    future_agent_masks = np.concatenate(future_agent_masks, axis=0)
-    future_agent_masks = torch.BoolTensor(future_agent_masks)
+    condition = [isinstance(element, np.ndarray) for element in pred_traj_len]
+    if False not in condition:
+        num_pred_agents = np.array([len(x) for x in pred_traj_len])
+        pred_traj_len = np.concatenate(pred_traj_len, axis=0)
+        num_pred_agents = torch.LongTensor(num_pred_agents)
+        pred_traj_len = torch.LongTensor(pred_traj_len)
+    else:
+        num_pred_agents = tuple(None for _ in range(len(pred_traj_len)))
 
-    # decode start vel & pos
+    # Decoding agent mask
+    condition = [isinstance(element, np.ndarray) for element in decoding_agents_mask]
+    if False not in condition:
+        decoding_agents_mask = np.concatenate(decoding_agents_mask, axis=0)
+        decoding_agents_mask = torch.BoolTensor(decoding_agents_mask)
+
+    # Decode start vel & pos
     decode_start_vel = np.concatenate(decode_start_vel, axis=0)
     decode_start_pos = np.concatenate(decode_start_pos, axis=0)
     decode_start_vel = torch.FloatTensor(decode_start_vel)
     decode_start_pos = torch.FloatTensor(decode_start_pos)
 
-    map_image = torch.stack(map_image, dim=0)
-    prior = torch.stack(prior, dim=0)
+    condition = [isinstance(element, torch.Tensor) for element in context_map]
+    if False not in condition:
+        context_map = torch.stack(context_map, dim=0)
 
-    scene_id = np.array(scene_id)
-
+    condition = [isinstance(element, torch.Tensor) for element in prior_map]
+    if False not in condition:
+        prior_map = torch.stack(prior_map, dim=0)
+    
     data = (
-        map_image, prior, 
-        future_agent_masks, 
-        num_past_agents, past_agents_traj, past_agents_traj_len, past_agents_traj_len_idx, 
-        num_future_agents, future_agents_traj, future_agents_traj_len, future_agents_traj_len_idx, 
-        future_agents_two_mask, future_agents_three_mask,
-        decode_start_vel, decode_start_pos, 
-        scene_id
+        obsv_traj, obsv_traj_len, num_obsv_agents,
+        pred_traj, pred_traj_len, num_pred_agents, 
+        decoding_agents_mask, decode_start_pos, decode_start_vel, 
+        context_map, prior_map, vis_map, metadata
     )
 
     return data
 
 class ArgoverseDataset(Dataset):
-    def __init__(self, data_partition, map_version, sampling_rate, sample_stride=3,
-                use_scene=True, scene_size=(64, 64), ploss_type=None, intrinsic_rate=10,
-                max_distance=56, num_workers=None, cache_file=None, multi_agent=True):
+    def __init__(self, data_dir, data_partition, logger, sampling_rate, intrinsic_rate=10,
+                 max_distance=56.0, num_workers=None, cache_file=None,
+                 context_map_size=None, prior_map_size=None, vis_map_size=None, multi_agent=True):
         """
         data_dir: Dataset root directory
         data_parititon: Dataset Parition (train | val | test_obs)
@@ -146,7 +134,9 @@ class ArgoverseDataset(Dataset):
         multi_agent: Boolean flag for including multiple agent setting
         """
         super(ArgoverseDataset, self).__init__()
-        self.data_dir = _data_dir
+        self.logger = logger
+
+        self.data_dir = data_dir
         self.data_partition = data_partition
 
         if num_workers:
@@ -164,309 +154,479 @@ class ArgoverseDataset(Dataset):
         self.max_obsv_len = int(self.intrinsic_rate * 2 // self.sampling_interval)
         self.max_pred_len = int(self.intrinsic_rate * 3 // self.sampling_interval)
         
-        self.sample_stride = sample_stride
-        self.min_past_obv_len = self.sampling_interval + 1	
-        self.min_future_obv_len = int(1 * self.intrinsic_rate)	
-        self.min_future_pred_len = int(1.5 * self.intrinsic_rate)	
+        self.min_enc_obsvlen = self.sampling_interval + 1	
+        self.min_dec_obsvlen = int(1 * self.intrinsic_rate)	
+        self.min_dec_predlen = int(3 * self.intrinsic_rate)	
         self.max_distance = max_distance
-
-        self.use_scene = use_scene
-        self.scene_size = scene_size
 
         self.multi_agent = multi_agent
 
-        if map_version=='1.3' or map_version=='2.0':
-            self.map_version = map_version
-        else:
-            raise("Invalid map: v1.3 | v2.0 are valid")
+        self.vis_map_size = vis_map_size
+        self.context_map_size = context_map_size
+        self.prior_map_size = prior_map_size
 
-        if map_version == '1.3':
-            self.img_transform = transforms.Compose([transforms.ToTensor(),
-                                                     transforms.Normalize([0.485, 0.456, 0.406],
-                                                                          [0.229, 0.224, 0.225]),
-                                                     transforms.Resize(self.scene_size)])
-        elif map_version == '2.0':
-            self.img_transform = transforms.Compose([transforms.ToTensor(),
-                                                     transforms.Normalize([23.0582], [27.3226])])
+        if (self.context_map_size is not None) or (self.prior_map_size is not None):
+            self.raw_dt_map_dict = {}
+            for city_name in ['PIT', 'MIA']:
+                raw_dt_map_path = pathlib.Path(self.data_dir).joinpath('raw_map', '{:s}_dt.pkl'.format(city_name))
+                self.raw_dt_map_dict[city_name] = load(raw_dt_map_path)
 
-        self.ploss_type = ploss_type
-        if ploss_type == 'map':
-            self.p_transform = transforms.Compose([transforms.ToTensor(),
-                                                   transforms.Normalize([23.0582], [27.3226]),
-                                                   transforms.Lambda(lambda x: F.log_softmax(x.reshape(-1), dim=0).reshape(x.shape[1:]))]
-                                                 )
-        # Extract Data:
+        if self.vis_map_size is not None:
+            self.raw_vis_map_dict = {}
+            for city_name in ['PIT', 'MIA']:
+                raw_vis_map_path = pathlib.Path(self.data_dir).joinpath('raw_map', '{:s}_mask.pkl'.format(city_name))
+                self.raw_vis_map_dict[city_name] = load(raw_vis_map_path)
+
+        if self.context_map_size is not None:
+            self.context_transform = transforms.Compose([transforms.ToTensor(),
+                                                         transforms.Normalize(-23.1, 27.3)])
+
+        if self.prior_map_size is not None:
+            self.prior_transform = transforms.Compose([transforms.ToTensor(),
+                                                       transforms.Lambda(lambda x: torch.where(x > 0, 0.0, x)),
+                                                       transforms.Lambda(lambda x: F.log_softmax(x.reshape(-1), dim=0).reshape(x.shape))])
+
         if cache_file is None:
-            cache_dir = "./argoverse_{}_cache.pkl".format(self.data_partition)
-
-            if os.path.isfile(cache_dir):
-                self.load_cache(cache_dir)
-            else:
-                self.get_data(save_cache_dir=cache_dir)
-
+            self.load_data()
         else:
-            if os.path.isfile(cache_file):
-                self.load_cache(cache_file)
+            cache_path = pathlib.Path(cache_file)
+
+            if cache_path.is_file():
+                self.load_cache(cache_path)
             else:
-                self.get_data(save_cache_dir=cache_file)
+                self.load_data(cache_path=cache_path)
+        
+        self.logger.info('Data Loading Complete!')
 
     def __getitem__(self, idx):
-        # Create one past list and future list with all the
-        past_agents_traj = self.past_agents_traj_list[idx]
-        past_agents_traj_len = self.past_agents_traj_len_list[idx]
-        future_agents_traj = self.future_agents_traj_list[idx]
-        future_agents_traj_len = self.future_agents_traj_len_list[idx]
-        future_agent_masks = self.future_agent_masks_list[idx]
-        decode_start_vel = self.decode_start_vel[idx]
+        if type(idx) is str:
+            idx = self.get_data_idx(idx)
+
+        obsv_traj = self.obsv_traj[idx]
+        obsv_traj_len = self.obsv_traj_len[idx]
+        pred_traj = self.pred_traj[idx]
+        pred_traj_len = self.pred_traj_len[idx]
+        decoding_agents_mask = self.decoding_agents_mask[idx]
         decode_start_pos = self.decode_start_pos[idx]
-        scene_id = self.scene_id[idx]
+        decode_start_vel = self.decode_start_vel[idx]
+        metadata = self.metadata[idx]
 
-        if self.use_scene:
-            if self.map_version == '1.3':
-                map_file = scene_id[3] + '.png'
-            elif self.map_version == '2.0':
-                map_file = scene_id[3] + '.pkl'
-            img_path = os.path.join(self.data_dir, scene_id[0], scene_id[1], scene_id[2], 'map', 'v{:s}'.format(self.map_version), map_file)
+        context_map = None
+        prior_map = None
+        vis_map = None
+        if (self.vis_map_size is not None) or (self.context_map_size is not None) or (self.prior_map_size is not None):
+            city_name = metadata['city_name']
+            X, Y = metadata['ref_translation']
 
-            if self.map_version == '1.3':
-                raw_map_image = Image.open(img_path)
-            elif self.map_version == '2.0':
-                with open(img_path, 'rb') as f:
-                    raw_image = pickle.load(f)
-                raw_map_image = raw_image.astype(np.float32)
-                raw_map_image = cv2.resize(raw_image.astype(np.float32), dsize=self.scene_size, interpolation=cv2.INTER_LINEAR)
+            if (self.context_map_size is not None) or (self.prior_map_size is not None):
+                raw_dt_map = self.raw_dt_map_dict[city_name]['map']
+                image_to_city = self.raw_dt_map_dict[city_name]['image_to_city']
 
-            map_image = self.img_transform(raw_map_image)
-        
-        else:
-            map_image = torch.FloatTensor([0.0])
+                scale_dt_h = image_to_city[1, 1]
+                translate_dt_h = image_to_city[1, 2]
+                scale_dt_w = image_to_city[0, 0]
+                translate_dt_w = image_to_city[0, 2]
 
-        if self.ploss_type == "map":
-            if self.map_version != '2.0' or not self.use_scene:
-                map_file = scene_id[3] + '.pkl'
-                img_path = os.path.join(self.data_dir, scene_id[0], scene_id[1], scene_id[2], 'map', 'v2.0', map_file)
-                with open(img_path, 'rb') as f:
-                    raw_image = pickle.load(f)
+                pixel_dims_h = scale_dt_h * self.max_distance * 2
+                pixel_dims_w = scale_dt_w * self.max_distance * 2
 
-            raw_map_image = cv2.resize(raw_image.astype(np.float32), dsize=(100, 100), interpolation=cv2.INTER_LINEAR)
-            raw_map_image[raw_map_image < 0] = 0 # Uniform on drivable area
-            raw_map_image = raw_map_image.max() - raw_map_image # Invert values so that non-drivable area has smaller values
-            prior = self.p_transform(raw_map_image)
+                crop_dims_h = np.ceil(np.sqrt(2 * pixel_dims_h**2) / 10) * 10
+                crop_dims_w = np.ceil(np.sqrt(2 * pixel_dims_w**2) / 10) * 10
                 
-        elif self.ploss_type == "logistic":
-            prior_path = os.path.join(self.data_dir, 'logistic_prior', scene_id[0], scene_id[2], scene_id[3] + '.pkl')
-            with open(prior_path, 'rb') as f:
-                prior = pickle.load(f)
-            prior = torch.FloatTensor(prior)
+                # Corners of the crop in the raw image's coordinate system.
+                crop_box = (X+translate_dt_w,
+                            Y+translate_dt_h,
+                            crop_dims_h,
+                            crop_dims_w)
+                crop_patch = self.get_patch(crop_box, patch_angle=0.0)
 
-        else:
-            prior = torch.FloatTensor([0.0])
-        
-        if 'test' in self.data_partition:
-          episode = (past_agents_traj, past_agents_traj_len, future_agent_masks, decode_start_vel, decode_start_pos, map_image, prior, scene_id)
-        else:
-          episode = (past_agents_traj, past_agents_traj_len, future_agents_traj, future_agents_traj_len, future_agent_masks, decode_start_vel, decode_start_pos, map_image, prior, scene_id)
+                # Do Crop
+                dt_crop, crop_boundary = self.crop_image(raw_dt_map,
+                                                        crop_patch)
+                
+                # Corners of the final image in the crop image's coordinate system.
+                final_box = (scale_dt_w*X - crop_boundary['left'] + translate_dt_w,
+                            scale_dt_h*Y - crop_boundary['up'] + translate_dt_h,
+                            pixel_dims_h,
+                            pixel_dims_w)
 
+                final_patch_angle = 0.0
+                final_patch = self.get_patch(final_box, patch_angle=final_patch_angle)
+                final_coords_in_crop = np.array(final_patch.exterior.coords)
+                dt_corner_points = final_coords_in_crop[:4]
+            
+            if self.vis_map_size is not None:
+                raw_vis_map = self.raw_vis_map_dict[city_name]['map']
+                image_to_city = self.raw_vis_map_dict[city_name]['image_to_city']
+
+                scale_vis_h = image_to_city[1, 1]
+                translate_vis_h = image_to_city[1, 2]
+                scale_vis_w = image_to_city[0, 0]
+                translate_vis_w = image_to_city[0, 2]
+
+                pixel_dims_h = scale_vis_h * self.max_distance * 2
+                pixel_dims_w = scale_vis_w * self.max_distance * 2
+
+                crop_dims_h = np.ceil(np.sqrt(2 * pixel_dims_h**2) / 10) * 10
+                crop_dims_w = np.ceil(np.sqrt(2 * pixel_dims_w**2) / 10) * 10
+                
+                # Corners of the crop in the raw image's coordinate system.
+                crop_box = (X+translate_vis_w,
+                            Y+translate_vis_h,
+                            crop_dims_h,
+                            crop_dims_w)
+                crop_patch = self.get_patch(crop_box, patch_angle=0.0)
+
+                # Do Crop
+                vis_crop, crop_boundary = self.crop_image(raw_vis_map,
+                                                          crop_patch)
+                
+                # Corners of the final image in the crop image's coordinate system.
+                final_box = (scale_vis_w*X - crop_boundary['left'] + translate_vis_w,
+                            scale_vis_h*Y - crop_boundary['up'] + translate_vis_h,
+                            pixel_dims_h,
+                            pixel_dims_w)
+                
+                final_patch_angle = 0.0
+                final_patch = self.get_patch(final_box, patch_angle=final_patch_angle)
+                final_coords_in_crop = np.array(final_patch.exterior.coords)
+                vis_corner_points = final_coords_in_crop[:4]
+
+        if self.vis_map_size is not None:
+            vis_map = self.transform_image(vis_crop.copy(),
+                                           vis_corner_points,
+                                           self.vis_map_size)
+
+        if self.context_map_size is not None:
+            context_map = self.transform_image(dt_crop.copy(),
+                                               dt_corner_points,
+                                               self.context_map_size,
+                                               self.context_transform)
+            context_map = context_map.float()
+
+        if self.prior_map_size is not None:
+            prior_map = self.transform_image(dt_crop.copy(),
+                                             dt_corner_points,
+                                             self.prior_map_size,
+                                             self.prior_transform)
+            prior_map = prior_map.float()
+
+        episode = (obsv_traj, obsv_traj_len, pred_traj, pred_traj_len, decoding_agents_mask, decode_start_pos, decode_start_vel, context_map, prior_map, vis_map, metadata)
         return episode
 
     def __len__(self):
-        return len(self.scene_id)
-
-    def load_cache(self, cache_dir):
-        with open(cache_dir, 'rb') as f:
-            results = pickle.load(f)
-
-        self.past_agents_traj_list, self.past_agents_traj_len_list,\
-        self.future_agents_traj_list, self.future_agents_traj_len_list,\
-        self.future_agent_masks_list,\
-        self.decode_start_pos, self.decode_start_vel, self.scene_id = list(zip(*results))
-
-    def get_data(self, save_cache_dir=None):
-        partition_dir = os.path.join(self.data_dir, self.data_partition)
-        print(f'Extracting data from: {partition_dir}')
-
-        sub_partitions = os.listdir(partition_dir)
-        sub_partitions.sort()
-        path_lists = []
-
-        for sub_partition in sub_partitions: 
-            print(f'Sub-partition: {sub_partition}')
-            path_lists.extend(self.extract_directory(sub_partition))
-
-        runner = ParallelSim(processes=self.num_workers)
-        option_list = [self.min_past_obv_len, self.min_future_obv_len, self.min_future_pred_len, self.max_distance, self.sampling_interval, self.max_obsv_len, self.max_pred_len, self.multi_agent]
-
-        for path_list in path_lists:
-            runner.add(self.extract_submodule_multicore, (path_list, option_list))
-
-        runner.run()
-        results = runner.get_results()
-
-        if save_cache_dir is not None:
-            with open(save_cache_dir, 'wb') as f:
-                pickle.dump(results, f) 
-
-        self.past_agents_traj_list, self.past_agents_traj_len_list,\
-        self.future_agents_traj_list, self.future_agents_traj_len_list,\
-        self.future_agent_masks_list,\
-        self.decode_start_pos, self.decode_start_vel, self.scene_id = list(zip(*results))
-
-        print('\nExtraction Compltete!\n')
-
-    def extract_directory(self, sub_partition):        
-        work_dir = os.path.join(self.data_dir, self.data_partition, sub_partition)
-        episodes = os.listdir(work_dir)
-
-        episodes.sort(key=lambda x: int(x[-8:], 16))
-        path_lists = []
-
-        num_episodes = len(episodes)
-        for i, episode in enumerate(episodes): 
-            observation_dir = os.path.join(work_dir, episode, 'observation')
-
-            reference_frames = os.listdir(observation_dir)
-            reference_frames.sort()
-
-            for j in range(len(reference_frames)):
-                path_lists.append((self.data_dir, self.data_partition, sub_partition, episode, reference_frames[j].replace('.pkl', '')))
-            print('Counting episodes {:d}/{:d}'.format(i, num_episodes), end='\r')
-
-        return path_lists
+        return len(self.scene)
 
     @staticmethod
-    def extract_submodule_multicore(path_list, options_list):
-        data_dir, data_partition, sub_partition, episode, reference_frame = path_list
-        min_past_obv_len, min_future_obv_len, min_future_pred_len, max_distance, sampling_interval, max_obsv_len, max_pred_len, is_MA = options_list
+    def get_patch(patch_box: Tuple[float, float, float, float],
+                  patch_angle: float = 0.0) -> Polygon:
+        """
+        Convert patch_box to shapely Polygon coordinates.
+        :param patch_box: Patch box defined as [x_center, y_center, height, width].
+        :param patch_angle: Patch orientation in degrees.
+        :return: Box Polygon for patch_box.
+        """
+        patch_x, patch_y, patch_h, patch_w = patch_box
 
-        def get_agent_ids(dataframe):
-            """
-            Returns:
-                    List of past agent ids: List of agent ids that are to be considered for the encoding phase.
-                    Future agent ids mask: A mask which dentoes if an agent in past agent ids list is to be considered
-                                        during decoding phase.
-            """
-            # Select past agent ids for the encoding phase.
-            # obsolute classes (previously used in Argo Tracking): (dataframe['class'] == 'VEHICLE') | (dataframe['class'] == 'LARGE_VEHICLE') | (dataframe['class'] == 'PEDESTRIAN') | (dataframe['class'] == 'ON_ROAD_OBSTACLE') | (dataframe['class'] == 'BICYCLE')
-            if is_MA:
-                past_df = dataframe.loc[((dataframe['class'] == 'AGENT') | (dataframe['class'] == 'AV') | (dataframe['class'] == 'OTHERS'))
-                                & (dataframe['observation_length']>=min_past_obv_len)]
+        x_min = patch_x - patch_w / 2.0
+        y_min = patch_y - patch_h / 2.0
+        x_max = patch_x + patch_w / 2.0
+        y_max = patch_y + patch_h / 2.0
 
-            else:
-                past_df = dataframe.loc[(dataframe['class'] == 'AGENT')]
+        patch = box(x_min, y_min, x_max, y_max)
+        patch = affinity.rotate(patch, patch_angle, origin=(patch_x, patch_y), use_radians=False)
 
-            past_agent_ids = past_df['track_id'].unique()
+        return patch
 
-            # Check if the encoding trajectories have their current position in the region of interest.
-            updated_past_agent_ids = []
-            for agent_id in past_agent_ids:
-                last_pos = past_df[past_df['track_id'] == agent_id].iloc[-1][['X','Y']].to_numpy()
-                if np.any(np.abs(last_pos) > max_distance):
-                    pass
-                else:
-                    updated_past_agent_ids.append(agent_id)
+    @staticmethod
+    def crop_image(image,
+                   crop_patch):
 
-            updated_past_agent_ids = np.array(updated_past_agent_ids)
+        # Corners of the crop in the raw image's coordinate system.
+        crop_coords_in_raw = np.array(crop_patch.exterior.coords).astype(np.int64)
 
-            # Select future agent ids for the decoding phase.
-            if is_MA:
-                future_df = dataframe.loc[(dataframe['class'] == 'AGENT')]
-                # future_df = dataframe.loc[((dataframe['class'] == 'AGENT') | (dataframe['class'] == 'AV') | (dataframe['class'] == 'OTHERS'))
-                #                 & (dataframe['observation_length']>=min_past_obv_len)]
+        _, lower_right_corner, _, upper_left_corner = crop_coords_in_raw[:4]
+        crop_left, crop_up = upper_left_corner
+        crop_right, crop_down = lower_right_corner
 
-            else:
-                future_df = dataframe.loc[(dataframe['class'] == 'AGENT')]
+        image_crop = image[crop_up:crop_down,
+                           crop_left:crop_right].copy()
+        
+        crop_boundary = {'up': crop_up,
+                         'down': crop_down,
+                         'left': crop_left,
+                         'right': crop_right}
 
-            future_agent_ids = future_df['track_id'].unique()
+        return image_crop, crop_boundary
 
-            # Create a mask corresponding to the past_agent_ids list where the value '1' in mask denotes
-            # that agent is to be considered while decoding and 0 denotes otherwise.
-            future_agent_ids_mask = np.isin(updated_past_agent_ids, future_agent_ids)
+    @staticmethod
+    def transform_image(image,
+                        from_corner_points,
+                        to_image_size,
+                        torch_transform=None):
+        to_corner_points = np.array([[to_image_size[1], 0],
+                                     [to_image_size[1], to_image_size[0]],
+                                     [0, to_image_size[0]],
+                                     [0, 0]])
+        
+        transform_matrix = cv2.getPerspectiveTransform(from_corner_points.astype(np.float32),
+                                                       to_corner_points.astype(np.float32))
+        
+        transformed = cv2.warpPerspective(image,
+                                          transform_matrix,
+                                          (to_image_size[1], to_image_size[0]))
+        
+        if torch_transform is not None:
+            transformed = torch_transform(transformed)
+        
+        return transformed
 
-            return updated_past_agent_ids, future_agent_ids_mask
+    def get_scene_name(self, idx):
+        if type(idx) is str:
+            idx = self.get_data_idx(idx)
 
-        def extract_trajectory_info(obv_df, pred_df, past_agent_ids, future_agent_ids_mask):
-            """
-            Extracts the past and future trajectories of the agents as well as the encode and decode
-            coordinates.
-            """
-            past_traj_list = []
-            past_traj_len_list = []
+        return self.scene[idx]
+    
+    def get_data_idx(self, scene):
+        return self.scene_to_idx_dict[scene]
 
-            future_traj_list = []
-            future_traj_len_list = []
+    def load_cache(self, cache_path):
+        results = load(cache_path)
+        self.logger.info('Found {:s} set cache {:s} with {:d} samples.'.format(self.data_partition, str(cache_path), len(results[0])))
 
-            decode_start_pos_list = []
-            decode_start_vel_list = []
-            for agent_id in past_agent_ids:
-                mask = obv_df['track_id'] == agent_id
-                
-                ### TODO: Modify the extraction routine so that it supports different sampling intervals.
-                past_agent_traj = obv_df[mask][['X', 'Y']].to_numpy().astype(np.float32) # raw past traj
-                past_agent_traj = past_agent_traj[-1::-sampling_interval, :][::-1, :] # sampled past traj according to sampling interval
-                decode_start_pos = past_agent_traj[-1]
-                decode_start_vel = (past_agent_traj[-1] - past_agent_traj[-2]) # decode velocity
+        self.obsv_traj = results[0]
+        self.obsv_traj_len = results[1]
+        self.pred_traj = results[2]
+        self.pred_traj_len = results[3]
+        self.decoding_agents_mask = results[4]
+        self.decode_start_pos = results[5]
+        self.decode_start_vel = results[6]
+        self.metadata = results[7]
 
-                obsv_len = past_agent_traj.shape[0]
-                obsv_pad = max_obsv_len - obsv_len
+        self.scene = [metadata['scene'] for metadata in results[7]]
+        self.scene_to_idx_dict = {key: val for val, key in enumerate(self.scene)}
 
-                if obsv_pad: # equiv. to if obsv_pad != 0
-                    past_agent_traj = np.pad(past_agent_traj, ((0, obsv_pad), (0, 0)), mode='constant')
-                
-                past_traj_list.append(past_agent_traj)
-                past_traj_len_list.append(obsv_len)
-                decode_start_pos_list.append(decode_start_pos)
-                decode_start_vel_list.append(decode_start_vel)
 
-            for agent_id in past_agent_ids[future_agent_ids_mask]:
-                mask = pred_df['track_id'] == agent_id
-                future_agent_traj = pred_df[mask][['X', 'Y']].to_numpy().astype(np.float32) # raw future traj
-                future_agent_traj = future_agent_traj[sampling_interval-1::sampling_interval] # sampled future traj according to sampling interval
+    def load_data(self, cache_path=None):
+        data_path = pathlib.Path(self.data_dir)
+        raw_map_path = data_path.joinpath('raw_map')
 
-                pred_len = future_agent_traj.shape[0]
-                pred_pad = max_pred_len - pred_len
+        partition_path = data_path.joinpath(self.data_partition)
+        obsv_path = partition_path.joinpath('observation')
+        obsv_sample_paths = [file_path for file_path in obsv_path.glob("*.pkl")]
+        obsv_sample_paths.sort()
 
-                if pred_pad:
-                    future_agent_traj = np.pad(future_agent_traj, ((0, pred_pad), (0, 0)), mode='constant')
-                
-                future_traj_list.append(future_agent_traj)
-                future_traj_len_list.append(pred_len)
-
-            past_traj_list = np.array(past_traj_list)
-            past_traj_len_list = np.array(past_traj_len_list)
-
-            future_traj_list = np.array(future_traj_list)
-            future_traj_len_list = np.array(future_traj_len_list)
-
-            decode_start_pos_list = np.array(decode_start_pos_list)
-            decode_start_vel_list = np.array(decode_start_vel_list)
-
-            return past_traj_list, past_traj_len_list, future_traj_list, future_traj_len_list, decode_start_pos_list, decode_start_vel_list
-
-        observation_file = os.path.join(data_dir, data_partition, sub_partition, episode, 'observation', reference_frame + '.pkl')
-
-        with open(observation_file, 'rb') as f:
-            observation_df = pickle.load(f)
-
-        prediction_df = None
-        if 'test' not in data_partition:
-          prediction_file = os.path.join(data_dir, data_partition, sub_partition, episode, 'prediction', reference_frame + '.pkl')
-          with open(prediction_file, 'rb') as f:
-              prediction_df = pickle.load(f)
-
-        past_agent_ids, future_agent_ids_mask = get_agent_ids(observation_df)
-
-        past_traj = None
-        past_traj_len = None
-        future_traj = None
-        future_traj_len = None
-        decode_start_pos = None
-        decode_start_vel = None
-        condition = bool(future_agent_ids_mask.sum())
-
-        if condition:
-            past_traj, past_traj_len, future_traj, future_traj_len, decode_start_pos, decode_start_vel = extract_trajectory_info(observation_df, prediction_df, past_agent_ids, future_agent_ids_mask)
+        pred_path= partition_path.joinpath('prediction')
+        if pred_path.is_dir():
+            pred_exists = True
         else:
-            pass
+            pred_exists = False
 
-        scene_id = [data_partition, sub_partition, episode, reference_frame]
-        return (past_traj, past_traj_len, future_traj, future_traj_len, future_agent_ids_mask, decode_start_pos, decode_start_vel, scene_id), condition
+        if pred_exists:
+            pred_sample_paths = [file_path for file_path in pred_path.glob("*.pkl")]
+            pred_sample_paths.sort()
+            if len(obsv_sample_paths) != len(pred_sample_paths):
+                msg = "# of files for observation and prediction are different.\n"
+                msg += "observation dir: {:s}, {:d} files.\n".format(str(obsv_path), len(obsv_sample_paths))
+                msg += "prediction dir: {:s}, {:d} files.".format(str(pred_path), len(pred_sample_paths))
+                raise ValueError(msg)
+
+        self.logger.info('Found {:d} {:s} set samples.'.format(len(obsv_sample_paths), self.data_partition))
+        runner = ParallelSim(processes=self.num_workers)
+        fixed_args = (self.min_enc_obsvlen, self.min_dec_obsvlen, self.min_dec_predlen,
+                      self.max_distance, self.sampling_interval, self.max_obsv_len,
+                      self.max_pred_len, self.multi_agent)
+        
+        
+        for idx in range(len(obsv_sample_paths)):
+            obsv_path = obsv_sample_paths[idx]
+            pred_path = pred_sample_paths[idx] if pred_exists else None
+            args = (obsv_path, pred_path) + fixed_args
+            runner.add(self.prepare_samples, args)
+            # self.prepare_samples(*args)
+        
+        runner.run()
+        results = runner.get_results()
+        results.sort(key=lambda sample: sample[-1]['scene']) # sort by scene_name.
+        results = list(zip(*results)) # transpose data structure.
+
+        if cache_path is not None:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            dump(results, cache_path)
+
+        self.obsv_traj = results[0]
+        self.obsv_traj_len = results[1]
+        self.pred_traj = results[2]
+        self.pred_traj_len = results[3]
+        self.decoding_agents_mask = results[4]
+        self.decode_start_pos = results[5]
+        self.decode_start_vel = results[6]
+        self.metadata = results[7]
+        
+        self.scene = [metadata['scene'] for metadata in results[7]]
+        self.scene_to_idx_dict = {key: val for val, key in enumerate(self.scene)}
+
+    @staticmethod
+    def prepare_samples(obsv_path: pathlib.Path,
+                        pred_path: Optional[pathlib.Path],
+                        min_enc_obsvlen: int,
+                        min_dec_obsvlen: int,
+                        min_dec_predlen: int,
+                        max_distance: float,
+                        sampling_interval: int,
+                        max_obsv_len: int,
+                        max_pred_len: int,
+                        multi_agent: bool = True):
+
+        obsv_scene_name = obsv_path.stem
+        
+        if pred_path is not None:
+            pred_scene_name = pred_path.stem
+
+            if (obsv_scene_name != pred_scene_name):
+                msg = "Observation and Prediction samples do not match.\n"
+                msg += "observation file: {:s}\n".format(str(obsv_path))
+                msg += "prediction file: {:s}".format(str(pred_path))
+                raise ValueError(msg)
+
+        _, ref_frame = [int(string) for string in obsv_scene_name.split('-')]
+
+        obsv_df = load(obsv_path)
+        if pred_path is not None:
+            pred_df = load(pred_path)
+
+        # Select instance tokens for the encoding phase.
+        encoding_df = obsv_df[obsv_df.OBSERVATION_TIMELEN >= min_dec_obsvlen]
+        if not multi_agent:
+            encoding_df = encoding_df[encoding_df.OBJECT_TYPE == "AGENT"]
+            
+        # Check agents are located within the max_distance at ref_frame.
+        ref_df = encoding_df[encoding_df.FRAME == ref_frame]
+        ref_location = ref_df[['X', 'Y']].to_numpy()
+
+        mask = np.all(np.abs(ref_location) < max_distance, axis=1)
+        ref_df = ref_df[mask]
+
+        encoding_tokens = ref_df["TRACK_ID"].unique()
+
+        decoding_agents_mask = None
+        if pred_path is not None:
+            # Select instance tokens for the decoding phase.
+            decoding_df = pred_df[pred_df.OBSERVATION_TIMELEN >= min_dec_obsvlen]
+            decoding_df = pred_df[pred_df.PREDICTION_TIMELEN >= min_dec_predlen]
+        
+            # Filter instance tokens that are not to be encoded.
+            filter_mask = np.isin(decoding_df["TRACK_ID"], encoding_tokens)
+            decoding_df = decoding_df[filter_mask]
+
+            if not multi_agent:
+                decoding_df = decoding_df[decoding_df.OBJECT_TYPE == "AGENT"]
+
+            # Create a mask for encoding_tokens where True denotes that
+            # the corresponding agent is to be decoded for prediction.
+            decoding_agents_mask = np.isin(encoding_tokens, decoding_df["TRACK_ID"].unique())
+
+            if decoding_agents_mask.sum() == 0:
+                return None
+
+        obsv_traj_list = []
+        obsv_traj_len_list = []
+        decode_start_pos_list = []
+        decode_start_vel_list = []
+        for token in encoding_tokens:
+            agent_enc_df = encoding_df[encoding_df.TRACK_ID == token]
+
+            obsv_trajectory = agent_enc_df[['X', 'Y']].to_numpy().astype(np.float32)
+            obsv_trajectory = obsv_trajectory[-1::-sampling_interval, :][::-1, :] # Sample Trajectory w/ sampling interval.
+
+            obsv_len = len(obsv_trajectory)
+            
+            decode_start_pos = obsv_trajectory[-1]
+            decode_start_vel = 0.0
+            if obsv_len > 1:
+                decode_start_vel = (obsv_trajectory[-1] - obsv_trajectory[-2]) # decode velocity
+
+            obsv_traj_list.append(obsv_trajectory)
+            obsv_traj_len_list.append(obsv_len)
+            decode_start_pos_list.append(decode_start_pos)
+            decode_start_vel_list.append(decode_start_vel)
+
+            obsv_traj_padded = []
+            for traj, traj_len in zip(obsv_traj_list, obsv_traj_len_list):
+                obsv_pad = max_obsv_len - traj_len
+                traj_padded = np.pad(traj, ((0, obsv_pad), (0, 0)), mode='constant')
+                obsv_traj_padded.append(traj_padded)
+
+        if pred_path is not None:
+            pred_traj_list = []
+            pred_traj_len_list = []
+            decoding_tokens = encoding_tokens[decoding_agents_mask]
+            for token in decoding_tokens:
+                agent_dec_df = decoding_df[decoding_df.TRACK_ID == token]
+
+                pred_trajectory = agent_dec_df[['X', 'Y']].to_numpy().astype(np.float32)
+                pred_trajectory = pred_trajectory[sampling_interval-1::sampling_interval] # Sample Trajectory w/ sampling interval.
+
+                pred_len = len(pred_trajectory)
+    
+                pred_traj_list.append(pred_trajectory)
+                pred_traj_len_list.append(pred_len)
+
+            pred_traj_padded = []
+            for traj, traj_len in zip(pred_traj_list, pred_traj_len_list):
+                pred_pad = max_pred_len - traj_len
+                traj_padded = np.pad(traj, ((0, pred_pad), (0, 0)), mode='constant')
+                pred_traj_padded.append(traj_padded)
+        
+        else:
+            decoding_tokens = encoding_tokens
+        
+        obsv_traj = np.array(obsv_traj_padded, dtype=np.float32)
+        obsv_traj_len = np.array(obsv_traj_len_list, dtype=np.int64)
+        decode_start_pos = np.array(decode_start_pos_list, dtype=np.float32)
+        decode_start_vel = np.array(decode_start_vel_list, dtype=np.float32)
+
+        pred_traj = pred_traj_len = None
+        if pred_path is not None:
+            pred_traj = np.array(pred_traj_padded, dtype=np.float32)
+            pred_traj_len = np.array(pred_traj_len_list, dtype=np.int64)
+
+        ego_df = obsv_df[obsv_df.OBJECT_TYPE == 'AGENT']
+        ego_ref_df = ego_df[ego_df.FRAME == ref_frame]
+
+        city_name = ego_ref_df['CITY_NAME'].values.item()
+        translation = ego_ref_df[['X_CITY', 'Y_CITY']].to_numpy().squeeze()
+        # yaw = ego_ref_df['ANGLE'].values.item()
+        # yaw_angle = Quaternion.to_degrees(yaw)
+
+        metadata = {'scene': obsv_scene_name,
+                    'city_name': city_name,
+                    'ref_translation': translation,
+                    # 'map_angle': yaw_angle,
+                    'encoding_tokens': encoding_tokens,
+                    'decoding_tokens': decoding_tokens}
+
+        return obsv_traj, obsv_traj_len, pred_traj, pred_traj_len, decoding_agents_mask, decode_start_pos, decode_start_vel, metadata
+
+if __name__ == "__main__":
+    from torch.utils.data import DataLoader
+    
+    dataset = ArgoverseDataset('./data/Preprocessed/Argoverse', 'test_obs', sampling_rate=2,
+                              max_distance=56.0, cache_file='./testrun_argo_testobs.pkl',
+                              context_map_size=(64, 64), prior_map_size=(100, 100), vis_map_size=(224, 224),
+                              multi_agent=True)
+    
+    loader = DataLoader(dataset,
+                        batch_size=16,
+                        shuffle=True,
+                        collate_fn=argoverse_collate,
+                        num_workers=0)
+    
+    for batch in loader:
+        obsv_traj, obsv_traj_len, obsv_num_agents, \
+        pred_traj, pred_traj_len, pred_num_agents, \
+        obsv_to_pred_mask, init_pos, init_vel, \
+        context_map, prior_map, vis_map, metadata = batch
+        
+        import pdb; pdb.set_trace()
+        pass

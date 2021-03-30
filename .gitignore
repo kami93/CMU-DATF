@@ -2,6 +2,8 @@
 **/.vscode/
 **/__pycache__/
 *.pth
-outputs/
-experiments/
+data/*
+tests/*
+experiment/*
+jupyter/*
 **/.ipynb_checkpoints/
