@@ -4,6 +4,15 @@ This code is PyTorch implementation of [Diverse and Admissible Trajectory Foreca
 
 ![Model Diagram](figures/model_figure.png)
 
+## Requirements
+Python 3 and the following external packages.
+- PyTorch>=1.7
+- torchvision
+- scipy
+- numpy
+- openCV
+- [Argoverse API](https://github.com/argoai/argoverse-api)
+- [nuScenes API](https://github.com/nutonomy/nuscenes-devkit)
 
 ## Downloading Dataset
 
