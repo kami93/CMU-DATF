@@ -3,6 +3,7 @@
 **/__pycache__/
 *.pth
 data/*
+!data/*/.gitkeep
 tests/*
 experiment/*
 jupyter/*
