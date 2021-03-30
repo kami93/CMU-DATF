@@ -193,18 +193,18 @@ class SpatialFetchAgent(nn.Module):
 
 
 
-class conv2DBatchNormRelu(nn.Module):
-    def __init__(self, in_channels, n_filters, k_size,  stride, padding, bias=True, dilation=1):
-        super(conv2DBatchNormRelu, self).__init__()
+# class conv2DBatchNormRelu(nn.Module):
+#     def __init__(self, in_channels, n_filters, k_size,  stride, padding, bias=True, dilation=1):
+#         super(conv2DBatchNormRelu, self).__init__()
 
-        self.cbr_unit = nn.Sequential(nn.Conv2d(int(in_channels), int(n_filters), kernel_size=k_size,
-                                                padding=padding, stride=stride, bias=bias, dilation=dilation),
-                                      nn.BatchNorm2d(int(n_filters)),
-                                      nn.ReLU(inplace=True))
+#         self.cbr_unit = nn.Sequential(nn.Conv2d(int(in_channels), int(n_filters), kernel_size=k_size,
+#                                                 padding=padding, stride=stride, bias=bias, dilation=dilation),
+#                                       nn.BatchNorm2d(int(n_filters)),
+#                                       nn.ReLU(inplace=True))
 
-    def forward(self, inputs):
-        outputs = self.cbr_unit(inputs)
-        return outputs
+#     def forward(self, inputs):
+#         outputs = self.cbr_unit(inputs)
+#         return outputs
 
 
 class conv2DRelu(nn.Module):
@@ -315,3 +315,71 @@ class ShallowCNN(nn.Module):
         output = self.dropout(x)
 
         return output
+
+class TestCNN(nn.Module):
+    def __init__(self, in_channels):  # Output Size: 30 * 30
+        super(TestCNN, self).__init__()
+        self.conv1 = conv2DBatchNormRelu(in_channels=in_channels, n_filters=16,
+                                          k_size=3, stride=1, padding=1, dilation=1)
+
+    def forward(self, image):
+        output = self.conv1(image)
+
+        return output
+
+    def pause_stats_update(self):
+        for instance in self.modules():
+            if isinstance(instance, MyBatchNorm2d):
+                instance.pause_stats_update()
+
+    def resume_stats_update(self):
+        for instance in self.modules():
+            if isinstance(instance, MyBatchNorm2d):
+                instance.resume_stats_update()
+
+class conv2DBatchNormRelu(nn.Module):
+    """ conv2DBatchNormRelu v2 with pause/resume stats update function.
+    """
+    def __init__(self, in_channels, n_filters, k_size,  stride, padding, bias=True, dilation=1):
+        super(conv2DBatchNormRelu, self).__init__()
+        self.cbr_unit = nn.Sequential(nn.Conv2d(int(in_channels), int(n_filters), kernel_size=k_size,
+                                                padding=padding, stride=stride, bias=bias, dilation=dilation),
+                                      MyBatchNorm2d(int(n_filters)),
+                                      nn.ReLU(inplace=True))
+
+    def forward(self, inputs):
+        outputs = self.cbr_unit(inputs)
+        return outputs
+    
+    def pause_stats_update(self):
+        for instance in self.modules():
+            if isinstance(instance, MyBatchNorm2d):
+                instance.pause_stats_update()
+
+    def resume_stats_update(self):
+        for instance in self.modules():
+            if isinstance(instance, MyBatchNorm2d):
+                instance.resume_stats_update()
+
+class MyBatchNorm2d(nn.BatchNorm2d):
+    def __init__(self, num_features, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True):
+        super(MyBatchNorm2d, self).__init__(num_features, eps, momentum, affine, track_running_stats)
+        self.stats_update = True
+
+    def pause_stats_update(self):
+        self.stats_update = False
+
+    def resume_stats_update(self):
+        self.stats_update = True
+    
+    def forward(self, input):
+        if self.training and not self.stats_update:
+            self._check_input_dim(input)
+            return F.batch_norm(
+                input,
+                None,
+                None,
+                self.weight, self.bias, self.training, 0.0, self.eps)
+
+        else:
+            return super(MyBatchNorm2d, self).forward(input)
