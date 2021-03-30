@@ -11,6 +11,9 @@ Python 3 and the following external packages.
 - scipy
 - numpy
 - openCV
+- pyquaternion
+- shapely
+- pykalman
 - [Argoverse API](https://github.com/argoai/argoverse-api)
 - [nuScenes API](https://github.com/nutonomy/nuscenes-devkit)
 
