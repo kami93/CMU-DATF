@@ -342,20 +342,54 @@ class ArgoverseDataset(Dataset):
     def crop_image(image,
                    crop_patch):
 
+        image_h, image_w = image.shape[:2]
+
         # Corners of the crop in the raw image's coordinate system.
-        crop_coords_in_raw = np.array(crop_patch.exterior.coords).astype(np.int64)
+        crop_coords_in_raw = np.array(crop_patch.exterior.coords)
 
         _, lower_right_corner, _, upper_left_corner = crop_coords_in_raw[:4]
         crop_left, crop_up = upper_left_corner
         crop_right, crop_down = lower_right_corner
 
+        if crop_left < 0:
+            pad_left = int(-crop_left) + 1
+            crop_left = 0
+        
+        else:
+            pad_left = 0
+            crop_left = int(crop_left)
+        
+        if crop_right >= image_w + 1:
+            pad_right = int(crop_right - image_w)
+            crop_right = int(image_w)
+        else:
+            pad_right = 0
+            crop_right = int(crop_right)
+        
+        if crop_up < 0:
+            pad_up = int(-crop_up) + 1
+            crop_up = 0
+        else:
+            pad_up = 0
+            crop_up = int(crop_up)
+
+        if crop_down >= image_h + 1:
+            pad_down = int(crop_down - image_h)
+            crop_down = int(image_h)
+        else:
+            pad_down = 0
+            crop_down = int(crop_down)
+
         image_crop = image[crop_up:crop_down,
                            crop_left:crop_right].copy()
-        
-        crop_boundary = {'up': crop_up,
-                         'down': crop_down,
-                         'left': crop_left,
-                         'right': crop_right}
+
+        if pad_left or pad_right or pad_up or pad_down:
+            image_crop = np.pad(image_crop, ((pad_up, pad_down),(pad_left, pad_right)), mode='constant')
+            
+        crop_boundary = {'up': crop_up-pad_up,
+                         'down': crop_down+pad_down,
+                         'left': crop_left-pad_left,
+                         'right': crop_right+pad_right}
 
         return image_crop, crop_boundary
 
@@ -608,11 +642,22 @@ class ArgoverseDataset(Dataset):
 
         return obsv_traj, obsv_traj_len, pred_traj, pred_traj_len, decoding_agents_mask, decode_start_pos, decode_start_vel, metadata
 
+class dummy_logger(object):
+    def info(self, x):
+        print(x)
+
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
-    
-    dataset = ArgoverseDataset('./data/Preprocessed/Argoverse', 'test_obs', sampling_rate=2,
-                              max_distance=56.0, cache_file='./testrun_argo_testobs.pkl',
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--split', default=None, help="")
+    parser.add_argument('--cache', default=None, help="")
+    args = parser.parse_args()
+
+    logger = dummy_logger()
+    dataset = ArgoverseDataset('./data/Preprocessed/Argoverse', args.split, logger=logger, sampling_rate=2,
+                              max_distance=56.0, cache_file=args.cache,
                               context_map_size=(64, 64), prior_map_size=(100, 100), vis_map_size=(224, 224),
                               multi_agent=True)
     
@@ -622,11 +667,10 @@ if __name__ == "__main__":
                         collate_fn=argoverse_collate,
                         num_workers=0)
     
-    for batch in loader:
+    for idx, batch in enumerate(loader):
         obsv_traj, obsv_traj_len, obsv_num_agents, \
         pred_traj, pred_traj_len, pred_num_agents, \
         obsv_to_pred_mask, init_pos, init_vel, \
         context_map, prior_map, vis_map, metadata = batch
-        
-        import pdb; pdb.set_trace()
+
         pass

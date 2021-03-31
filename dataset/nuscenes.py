@@ -329,20 +329,54 @@ class NuscenesDataset(Dataset):
     def crop_image(image,
                    crop_patch):
 
+        image_h, image_w = image.shape[:2]
+
         # Corners of the crop in the raw image's coordinate system.
-        crop_coords_in_raw = np.array(crop_patch.exterior.coords).astype(np.int64)
+        crop_coords_in_raw = np.array(crop_patch.exterior.coords)
 
         _, lower_right_corner, _, upper_left_corner = crop_coords_in_raw[:4]
         crop_left, crop_up = upper_left_corner
         crop_right, crop_down = lower_right_corner
 
+        if crop_left < 0:
+            pad_left = int(-crop_left) + 1
+            crop_left = 0
+        
+        else:
+            pad_left = 0
+            crop_left = int(crop_left)
+        
+        if crop_right >= image_w + 1:
+            pad_right = int(crop_right - image_w)
+            crop_right = int(image_w)
+        else:
+            pad_right = 0
+            crop_right = int(crop_right)
+        
+        if crop_up < 0:
+            pad_up = int(-crop_up) + 1
+            crop_up = 0
+        else:
+            pad_up = 0
+            crop_up = int(crop_up)
+
+        if crop_down >= image_h + 1:
+            pad_down = int(crop_down - image_h)
+            crop_down = int(image_h)
+        else:
+            pad_down = 0
+            crop_down = int(crop_down)
+
         image_crop = image[crop_up:crop_down,
                            crop_left:crop_right].copy()
-        
-        crop_boundary = {'up': crop_up,
-                         'down': crop_down,
-                         'left': crop_left,
-                         'right': crop_right}
+
+        if pad_left or pad_right or pad_up or pad_down:
+            image_crop = np.pad(image_crop, ((pad_up, pad_down),(pad_left, pad_right)), mode='constant')
+            
+        crop_boundary = {'up': crop_up-pad_up,
+                         'down': crop_down+pad_down,
+                         'left': crop_left-pad_left,
+                         'right': crop_right+pad_right}
 
         return image_crop, crop_boundary
 
