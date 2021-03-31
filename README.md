@@ -72,7 +72,7 @@ To fine-tune the proposed method under a minimal set of options, run the followi
 python main.py --model_type=AttGlobal_Scene_CAM_NFDecoder --dataset=nuscenes \
 --train_partition=train_all --train_cache=./train_all.nusc.pkl \
 --val_partition=val --val_cache=./val.nusc.pkl \
---tag=attgscam.finetune.nusc --batch_size=8 --init_lr=1e-5 \
+--tag=attgscam.finetune.nusc --batch_size=8 --init_lr=1e-5 --lr_decay=0 \
 --restore_path=./experiment/attgscam.nusc* --restore_epoch=*
 ```
 
@@ -81,7 +81,7 @@ python main.py --model_type=AttGlobal_Scene_CAM_NFDecoder --dataset=nuscenes \
 python main.py --model_type=AttGlobal_Scene_CAM_NFDecoder --dataset=argoverse \
 --train_partition=train_all --train_cache=./train_all.argo.pkl \
 --val_partition=val --val_cache=./val.argo.pkl \
---tag=attgscam.finetune.argo --batch_size=8 --init_lr=1e-5 \
+--tag=attgscam.finetune.argo --batch_size=8 --init_lr=1e-5 --lr_decay=0 \
 --restore_path=./experiment/attgscam.argo* --restore_epoch=*
 ```
 
