@@ -578,6 +578,11 @@ class NuscenesDataset(Dataset):
 
         return obsv_traj, obsv_traj_len, pred_traj, pred_traj_len, decoding_agents_mask, decode_start_pos, decode_start_vel, metadata
 
+
+class dummy_logger(object):
+    def info(self, x):
+        print(x)
+
 if __name__ == "__main__":
     from torch.utils.data import DataLoader
     import argparse
@@ -586,7 +591,8 @@ if __name__ == "__main__":
     parser.add_argument('--cache', default=None, help="")
     args = parser.parse_args()
 
-    dataset = NuscenesDataset('./data/Preprocessed/nuScenes', 'val', sampling_rate=2,
+    logger = dummy_logger()
+    dataset = NuscenesDataset('./data/Preprocessed/nuScenes', 'val', sampling_rate=2, logger=logger,
                               sample_stride=1, context_map_size=(64, 64), prior_map_size=(100, 100), vis_map_size=(224, 224),
                               max_distance=56, cache_file=args.cache, multi_agent=True)
     
