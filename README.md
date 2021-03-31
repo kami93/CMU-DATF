@@ -73,7 +73,7 @@ python main.py --model_type=AttGlobal_Scene_CAM_NFDecoder --dataset=nuscenes \
 --train_partition=train_all --train_cache=./train_all.nusc.pkl \
 --val_partition=val --val_cache=./val.nusc.pkl \
 --tag=attgscam.finetune.nusc --batch_size=8 --init_lr=1e-5 \
---restore_path=./experiment/attgscam.nusc --restore_epoch=50
+--restore_path=./experiment/attgscam.nusc* --restore_epoch=*
 ```
 
 **Argoverse**
@@ -82,7 +82,7 @@ python main.py --model_type=AttGlobal_Scene_CAM_NFDecoder --dataset=argoverse \
 --train_partition=train_all --train_cache=./train_all.argo.pkl \
 --val_partition=val --val_cache=./val.argo.pkl \
 --tag=attgscam.finetune.argo --batch_size=8 --init_lr=1e-5 \
---restore_path=./experiment/attgscam.argo --restore_epoch=50
+--restore_path=./experiment/attgscam.argo* --restore_epoch=*
 ```
 
 ## Testing
