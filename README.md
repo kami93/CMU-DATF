@@ -63,7 +63,7 @@ python main.py --model_type=AttGlobal_Scene_CAM_NFDecoder --dataset=argoverse \
 ```
 
 ## Fine-tuning
-After the initial training is done either due to reaching the maximum set epochs or the maximum set learning rate decays, one must perform finetuning to achieve the best performance in testing time. To do so, set the training split to ***train_all*** and provide the location of the initial training log and the restoring epoch to arguments *--restore_path* and *--restore_epoch*. In addition, set a small learning rate value (e.g., 1e-5) which should be much smaller than that used during the initial training. Usually, an epoch of fine-tuning suffices to achieve the best performance; fine-tuning for more than two epochs may harm the performance.
+After the initial training is done either due to reaching the maximum set epochs or the maximum set learning rate decays, one must perform finetuning to achieve the best performance in testing time. To do so, set the training split to ***train_all*** and provide the location of the initial training log and the restoring epoch to arguments *--restore_path* and *--restore_epoch*. In addition, set a small learning rate value (e.g., 1e-5) which should be much smaller than that used during the initial training. Also, the learning rate decay on plateau must be turned off or the model would cheat by adapting its training schedule to achieve a good performance on ***val*** split. Usually, an epoch of fine-tuning suffices to achieve the best performance; fine-tuning for more than two epochs may harm the performance.
 
 To fine-tune the proposed method under a minimal set of options, run the following commands.
 
