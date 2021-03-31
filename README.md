@@ -37,15 +37,15 @@ You will have to download [Argoverse](https://www.argoverse.org/data.html#downlo
 
 ## Preprocessing Dataset
 
-Both Argoverse and nuScenes dataset have to be preprocessed prior to testing this model. To do so, you may simply run python scripts **preprocess_argoverse.py** and **preprocess_nuscenes.py**. Each script will generate distance transform of drivable area map and partition **train, train_val,** and **val** (plus, **test_obs** for Argoverse) splits for training. Note that these names do not represent ***train/validation/test sets*** regime in general machine learning literature. Instead, they are derived from the naming done by authors for each dataset. In this model, overall, **train split** corresponds to  ***train set***, **train_val split** corresponds to ***validation set***, and **val split** corresponds to ***test set***. The scripts will additionally generate symlinks to form **train_all split**, which is the union of **train split** and **train_val split** to be used for finetuning this model.
+Both Argoverse and nuScenes dataset have to be preprocessed prior to testing this model. To do so, you may simply run python scripts **preprocess_argoverse.py** and **preprocess_nuscenes.py**. Each script will generate distance transform of drivable area map and partition **train, train_val,** and **val** (plus, **test_obs** for Argoverse) splits for training. Note that these names do not represent ***train/validation/test*** regime in general machine learning literature. Instead, they are derived from the naming done by authors for each dataset. In this model, overall, the **train** split corresponds to the ***train set***, the **train_val** split corresponds to the ***validation set***, and the **val** split corresponds to the ***test set***. The scripts will additionally generate symlinks to form **train_all** split, which is the union of **train** and **train_val** to be used for finetuning this model.
 
-In **preprocess_nuscenes.py**, Kalman smoothing with constant velocity model will be performed to generate trajectories from tracklets since the original nuScenes dataset is not geared to trajectories task (UPDATE: nuScenes now has the [*prediction* task](https://www.nuscenes.org/prediction) open).
+In addition, **preprocess_nuscenes.py** will perform Kalman smoothing with constant velocity model to generate trajectories from tracklets since the original nuScenes dataset is not geared to trajectories task (UPDATE: nuScenes now has the [*prediction* task](https://www.nuscenes.org/prediction) open).
 
 The preprocessed datasets will be saved at **data/Preprocessed/**.
 
 
 ## Initial Training
-This model is initially trained using **train** with learning rate decay on plateau depending on performances measured using **train_val**. See comments and values in main.py for the hyperparameter details. To train the proposed method under a minimal set of options, run the following commands.
+This model is initially trained using **train** split with learning rate decay on plateau depending on performances measured using **train_val** split. See comments and values in main.py for the hyperparameter details. To train the proposed method under a minimal set of options, run the following commands.
 
 **nuScenes**
 ```
@@ -87,7 +87,7 @@ python main.py --model_type=AttGlobal_Scene_CAM_NFDecoder --dataset=argoverse \
 
 ## Testing
 
-Testing will be used by assigning checkpoint to argument *--test_ckpt*.
+Testing can be performed by assigning checkpoint to argument *--test_ckpt*. In the default setting, the test will output the mean and the standard deviation for ADEs/FDEs/rF/DAC/DAO after 10 testing trails on **val** split.
 
 **nuScenes**
 ```
@@ -109,9 +109,9 @@ python main.py --model_type=AttGlobal_Scene_CAM_NFDecoder --dataset=argoverse \
 ## Things to do
 
 - [x] Re-implement preprocess_argoverse.py and preprocess_nuscenes.py.
-- [] Reorganize implementations for MATF/R2P2/Desire/CSP/SimpleEncoderDecoder
-- [] Reorganize comments for model definition and miscellaneous scripts.
-- [] Note hyperparameters for training/fine-tuning at README.md.
+- [ ] Re-organize implementations for MATF/R2P2/Desire/CSP/SimpleEncoderDecoder
+- [ ] Re-organize comments for model definition and miscellaneous scripts.
+- [ ] Note hyperparameters for training/fine-tuning at README.md.
 
 ## Citation
 Please cite the original publication;
