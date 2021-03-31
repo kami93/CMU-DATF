@@ -277,19 +277,23 @@ def main():
   random.seed(seed)
   
   if do_trajectories:
+    train_all = None
     for partition in ['train', 'train_val', 'val', 'test_obs']:
       print("Start Processing {:s} set.".format(partition))
       if 'train' in partition:
-        partition_path = P(input_root).joinpath('train', 'data')
-        afl = ArgoverseForecastingLoader(partition_path)
-        seq_list = afl.seq_list
-        seq_list.sort()
-        np.random.shuffle(seq_list)
+        if train_all is None:
+          partition_path = P(input_root).joinpath('train', 'data')
+          afl = ArgoverseForecastingLoader(partition_path)
+          seq_list = afl.seq_list
+          seq_list.sort()
+          np.random.shuffle(seq_list)
+          train_all = seq_list
+
         if partition == 'train':
-          seq_list = seq_list[int(len(seq_list) * FRAC_TRAIN_VAL):]
+          seq_list = train_all[int(len(train_all) * FRAC_TRAIN_VAL):]
         
         if partition == 'train_val':
-          seq_list = seq_list[:int(len(seq_list) * FRAC_TRAIN_VAL)]
+          seq_list = train_all[:int(len(train_all) * FRAC_TRAIN_VAL)]
 
       else:
         partition_path = P(input_root).joinpath(partition, 'data')
