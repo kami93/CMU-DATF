@@ -152,7 +152,7 @@ Training Complete!
 ```
 python main.py --model_type=AttGlobal_Scene_CAM_NFDecoder --dataset=nuscenes --
 train_partition=train_all --train_cache=./train_all.nusc.pkl --val_partition=val --val_cache=./val.nusc.pkl --tag=attgscam.finetune.nusc
---batch_size=8 --init_lr=1e-5 --lr_decay=0 --restore_path=./experiment/attgscam.nusc__31_March__22_17_/ --restore_epoch=66 --gpu_id=2
+--batch_size=8 --init_lr=1e-5 --lr_decay=0 --restore_path=./experiment/attgscam.nusc__31_March__22_17_/ --restore_epoch=66
 
 Experiment Path experiment/attgscam.finetune.nusc__01_April__17_03_.
 Set random seed 88245.
